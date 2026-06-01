@@ -1,0 +1,19 @@
+[package]
+name = "memorycore-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+memorycore-core = { path = "../memorycore-core" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+walkdir.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

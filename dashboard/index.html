@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MemoryCore Graph</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="rail">
+        <div class="mark" aria-label="MemoryCore">MC</div>
+        <button class="rail-button active" data-surface="graph" title="Graph" data-surface-title="Graph">
+          <span class="rail-icon">G</span>
+          <span class="rail-count" data-surface-count="graph">0</span>
+        </button>
+        <button class="rail-button" data-surface="files" title="Files" data-surface-title="Files">
+          <span class="rail-icon">F</span>
+          <span class="rail-count" data-surface-count="files">0</span>
+        </button>
+        <button class="rail-button" data-surface="plugins" title="Plugins" data-surface-title="Plugins">
+          <span class="rail-icon">P</span>
+          <span class="rail-count" data-surface-count="plugins">0</span>
+        </button>
+        <button class="rail-button" data-surface="skills" title="Skills" data-surface-title="Skills">
+          <span class="rail-icon">S</span>
+          <span class="rail-count" data-surface-count="skills">0</span>
+        </button>
+        <button class="rail-button" data-surface="adapters" title="Adapters" data-surface-title="Adapters">
+          <span class="rail-icon">A</span>
+          <span class="rail-count" data-surface-count="adapters">0</span>
+        </button>
+        <button class="rail-button" data-surface="memory" title="Memory" data-surface-title="Memory">
+          <span class="rail-icon">M</span>
+          <span class="rail-count" data-surface-count="memory">0</span>
+        </button>
+        <button class="rail-button" data-surface="sessions" title="Sessions" data-surface-title="Sessions">
+          <span class="rail-icon">T</span>
+          <span class="rail-count" data-surface-count="sessions">0</span>
+        </button>
+      </aside>
+
+      <aside class="sidebar">
+        <section class="project-block">
+          <div class="section-label">Project</div>
+          <h1>MemoryCore Graph</h1>
+          <p id="projectPath">Local graph workspace</p>
+          <div class="status-row"><span class="dot"></span> Local-first</div>
+        </section>
+
+        <section class="stats">
+          <div><span id="nodeCount">0</span><small>Nodes</small></div>
+          <div><span id="edgeCount">0</span><small>Edges</small></div>
+          <div><span id="snapshotCount">0</span><small>Snapshots</small></div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <span class="section-label">Graph Filters</span>
+            <button id="resetFilter">Reset</button>
+          </div>
+          <input id="filterInput" class="filter" placeholder="Filter by name, path, kind..." />
+          <div id="kindFilters" class="check-list"></div>
+        </section>
+
+        <section>
+          <div class="section-label">Edge Types</div>
+          <div id="edgeLegend" class="legend"></div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="toolbar">
+          <div class="search-wrap">
+            <span>/</span>
+            <input id="searchInput" placeholder="Search nodes" />
+          </div>
+          <div class="analyze-wrap">
+            <input id="analyzeTargetInput" placeholder="Analyze target" />
+            <button id="analyzeTargetButton" type="button">Analyze</button>
+          </div>
+          <button id="fitButton">Fit Graph</button>
+          <button id="exportButton">Export Mermaid</button>
+          <label class="depth-control" for="focusDepth">
+            <span>Depth</span>
+            <select id="focusDepth">
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+            </select>
+          </label>
+          <span class="storage-chip">SQLite</span>
+        </header>
+
+        <section class="canvas-wrap">
+          <svg id="graphCanvas" role="img" aria-label="Interactive MemoryCore graph"></svg>
+          <div class="mini-map" id="miniMap"></div>
+        </section>
+      </main>
+
+      <aside class="inspector">
+        <div class="tabs">
+          <button class="active" data-tab="inspector">Inspector</button>
+          <button data-tab="navigator">Navigator</button>
+        </div>
+        <section id="inspectorPane">
+          <div class="section-label">Search Results</div>
+          <div id="searchResults" class="search-results">
+            <div class="empty">Type to search the local index.</div>
+          </div>
+          <section>
+            <div class="section-head">
+              <span class="section-label">Recent Events</span>
+              <span id="eventSummary" class="section-metric">0</span>
+            </div>
+            <div id="eventFeed" class="event-feed">
+              <div class="empty">Loading events...</div>
+            </div>
+          </section>
+          <section>
+            <div class="section-head">
+              <span class="section-label">Recent Snapshots</span>
+              <span id="snapshotSummary" class="section-metric">0</span>
+            </div>
+            <div id="snapshotFeed" class="event-feed">
+              <div class="empty">Loading snapshots...</div>
+            </div>
+          </section>
+          <section>
+            <div class="section-head">
+              <span class="section-label">Registered Adapters</span>
+              <span id="adapterSummary" class="section-metric">0</span>
+            </div>
+            <div id="adapterFeed" class="event-feed">
+              <div class="empty">Loading adapters...</div>
+            </div>
+          </section>
+          <section>
+            <div class="section-head">
+              <span class="section-label">Memory Cases</span>
+              <span id="memorySummary" class="section-metric">0</span>
+            </div>
+            <div id="memoryFeed" class="event-feed">
+              <div class="empty">Loading memory cases...</div>
+            </div>
+          </section>
+          <section>
+            <div class="section-head">
+              <span class="section-label">Sessions</span>
+              <span id="sessionSummary" class="section-metric">0</span>
+            </div>
+            <div id="sessionFeed" class="event-feed">
+              <div class="empty">Loading sessions...</div>
+            </div>
+          </section>
+          <section>
+            <div class="section-head">
+              <span class="section-label">Embeddings</span>
+              <span id="embeddingSummary" class="section-metric">0</span>
+            </div>
+            <div class="embedding-search">
+              <input id="embeddingSearchInput" type="search" placeholder="Search embeddings" />
+              <button id="embeddingSearchButton" type="button">Search</button>
+            </div>
+            <div id="embeddingFeed" class="event-feed">
+              <div class="empty">Loading embeddings...</div>
+            </div>
+          </section>
+          <section id="nodeDetails">
+            <div class="empty">Select a node to inspect metadata and impact edges.</div>
+          </section>
+        </section>
+        <section id="navigatorPane" hidden>
+          <div class="section-head">
+            <span class="section-label">Selected Node</span>
+            <span id="navigatorTraversalCount" class="section-metric">0</span>
+          </div>
+          <div id="navigatorTraversal" class="navigator-list">
+            <div class="empty">Select a node to browse its neighborhood.</div>
+          </div>
+          <div class="section-head">
+            <span class="section-label">Visible Nodes</span>
+            <span id="navigatorCount" class="section-metric">0</span>
+          </div>
+          <div id="navigatorList" class="navigator-list">
+            <div class="empty">Use the graph filters to shape the current slice.</div>
+          </div>
+        </section>
+      </aside>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>

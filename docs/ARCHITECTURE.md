@@ -1,0 +1,149 @@
+# MemoryCore Architecture
+
+## Overview
+
+MemoryCore is organized around a single project-local workspace:
+
+```text
+memory + graph + daemon + MCP + plugins + skills + adapters + dashboard
+```
+
+The current implementation is intentionally local-first. All persistent state
+hangs off `.memorycore/`, with SQLite as the primary database and the daemon as
+the coordination point for graph updates, event logging, MCP access, and local
+API serving.
+
+## Storage Layer
+
+The current project layout is:
+
+```text
+.memorycore/
+├── index.db
+├── sessions/
+├── snapshots/
+│   ├── objects/
+│   └── refs/
+├── embeddings/
+├── plugins/
+├── skills/
+├── events/
+├── logs/
+└── config.toml
+```
+
+`index.db` is the primary SQLite database. It currently stores:
+
+- `project_info`
+- `sessions`
+- `messages` and `messages_fts`
+- `snapshots` and `snapshot_files`
+- `embeddings`
+- `graph_nodes`
+- `graph_edges`
+- `event_log`
+- `plugins`
+- `skills`
+- `adapters`
+
+SQLite runs in WAL mode and uses FTS5 for message search.
+
+## Runtime Layer
+
+The daemon is the always-on runtime. It currently:
+
+- starts and stops from the CLI
+- maintains a process status file and log file
+- wakes on native file events, processes changed paths directly, handles
+  renames as delete-plus-create, and uses a slower background lane for the
+  remaining runtime surfaces
+- records file events in `event_log`
+- rescans changed files into the graph store
+- serves the local API on `127.0.0.1:7330`
+- backs the MCP stdio server
+
+The current watcher uses native OS file event backends for project file
+wakeups, processes file deletions into the graph cleanup path, handles renames
+as delete-plus-create, and uses a slower background lane for git, session,
+plugin, and skill refreshes.
+
+## Graph Layer
+
+The graph layer stores project, folder, file, and symbol nodes with directed
+edges.
+
+Current graph behavior:
+
+- `memorycore graph file <path>` scans one file
+- `memorycore graph folder <path>` scans a folder recursively
+- `memorycore graph query <target>` returns a focused subgraph around a match
+- `memorycore graph query <target> --depth 2` expands the focused neighborhood
+- `memorycore graph query <target> --format mermaid` renders that subset as a diagram
+- `memorycore graph query <target> --format mermaid --depth 2` renders the deeper neighborhood as a diagram
+- Rust files are parsed with tree-sitter and emit symbol nodes, import nodes,
+  and call edges, with folder scans adding project-level cross-file call
+  resolution, `resolves_import` edges, `resolves_import_symbol` edges, and
+  `declares_module` file dependencies
+- `contains`, `defines`, `imports`, `resolves_import`, `resolves_import_symbol`,
+  `calls`, and `declares_module` edges are written to SQLite
+- Mermaid and JSON renderers export the current graph
+
+This is enough to drive a local node graph and to support dashboard rendering.
+More edge types such as dependency normalization and richer semantic linking
+are planned after the current symbol extraction path is stabilized.
+
+## MCP And API
+
+MemoryCore exposes two local integration surfaces:
+
+- `memorycore mcp serve` for MCP clients
+- `memorycore api serve` for browser and local tooling clients
+
+The MCP server currently exposes search, snapshot, graph query, graph render,
+impact, adapter listing, memory-case listing, session listing/detail,
+embedding metadata, embedding vector search, and target analysis tools. Graph query and graph render both support a focused
+target and optional depth. The HTTP API serves health, status, graph JSON,
+node-specific graph payloads with optional depth, focused Mermaid text for
+selected graph targets with optional depth, impact text with optional depth,
+recent event payloads, snapshot list/detail payloads, adapter list payloads,
+memory-case list payloads, session list/detail payloads, embedding metadata
+and embedding search payloads, analysis payloads, and the SQLite-backed search index. The dashboard uses the same depth contract and exposes a
+focus-depth control for node expansion. The dashboard also reflects the
+selected node and focus depth in the URL and persists the same state locally.
+The active tab is persisted too, so Inspector/Navigator state survives reloads.
+Its Navigator tab presents the current filtered node slice as a browseable
+list, and the selected node's connected neighborhood at the current depth, with
+inspect and focus actions on each node.
+The Inspector pane also reads the adapter registry from `/adapters` and memory
+cases from `/memory-cases`, so local agent integrations and pinned context can
+be inspected and focused without going through search. Imported sessions are
+read from `/sessions`; selected session nodes load their `/session/<id>` message
+details directly in the inspector. Selected graph nodes also load `/analyze`
+reports that combine graph context, search hits, and related memory cases. The
+toolbar can run the same analysis for arbitrary targets without selecting a
+node first. Analysis reports can copy Mermaid generated by
+`/analyze?format=mermaid`.
+The left rail switches the navigator surface between Graph, Files, Plugins,
+Skills, Adapters, Memory, and Sessions so those local node sets can be browsed directly.
+Search requests can also be scoped by kind so the dashboard and agent surfaces
+can narrow results to files, plugins, skills, adapters, snapshots, and other
+node kinds. The search API also returns per-surface counts for Graph, Files,
+Plugins, Skills, Adapters, Memory, and Sessions so the dashboard can keep its rail badges
+in sync with the current query.
+`GET /status` includes a structured daemon state object with `alive`, `status`,
+and `error` so callers can distinguish live, stale, and missing daemon status.
+Search hits now include snapshots
+alongside files, graph nodes, messages, memory cases, and events. `GET /status`
+includes graph, plugin, skill, adapter, event, and snapshot counts.
+
+## Extensibility
+
+Plugins, skills, and adapters are separate on purpose:
+
+- Plugins extend the daemon at runtime through a manifest and registry.
+- Skills describe repeatable agent workflows and are stored per project.
+- Adapters describe local agent integrations, session locations, and optional
+  launch commands.
+
+All three are tracked in SQLite so the project stays portable and easy to back
+up.

@@ -1,0 +1,15 @@
+[package]
+name = "memorycore-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+memorycore-core = { path = "../memorycore-core" }
+memorycore-graph = { path = "../memorycore-graph" }
+memorycore-adapters = { path = "../memorycore-adapters" }
+memorycore-embeddings = { path = "../memorycore-embeddings" }
+tiny_http.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true

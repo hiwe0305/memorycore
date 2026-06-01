@@ -1,0 +1,71 @@
+/goal Phát triển MemoryCore thành một local-first coding memory system chạy 24/7, có daemon, code graph, memory graph, MCP tools, plugin system, skill workflow, dashboard diagram/node graph, và SQLite storage.
+
+Mục tiêu tổng thể:
+- Biến MemoryCore thành hệ thống kiểm soát toàn bộ project code local.
+- Có thể phân tích 1 file, 1 folder, 1 thuật toán, 1 system, hoặc 1 memory case.
+- Có thể sinh diagram nhanh bằng Mermaid và node graph tương tác qua dashboard.
+- Chạy daemon 24/7 để watch file/session/git changes, update search index, graph index, snapshot, plugin, skill.
+- Tích hợp với AI agents qua MCP.
+- Giữ local-first, privacy-first, nhẹ, dễ backup.
+
+Ưu tiên database:
+- SQLite là primary database.
+- SQLite FTS5 cho full-text search.
+- SQLite graph_nodes / graph_edges cho code graph và memory graph.
+- Event log trong SQLite.
+- Session logs lưu JSONL.zst.
+- Snapshot lưu content-addressed files.
+- Embeddings lưu binary mmap/HNSW file, metadata trong SQLite.
+
+Hãy phát triển theo thứ tự:
+1. Rà soát docs hiện tại: README.md, docs/ARCHITECTURE.md, docs/PROJECT_STRUCTURE.md, docs/GRAPH_ARCHITECTURE.md, docs/DAEMON_RUNTIME.md, docs/EXTENSIBILITY.md, docs/SOLUTION_BLUEPRINT.md.
+2. Đề xuất implementation plan ngắn gọn theo phase.
+3. Scaffold Rust workspace nếu chưa có.
+4. Tạo core crates:
+   - memorycore-core
+   - memorycore-daemon
+   - memorycore-graph
+   - memorycore-cli
+   - memorycore-api
+   - memorycore-plugin-host
+   - memorycore-embeddings
+   - memorycore-adapters
+5. Implement MVP trước:
+   - memorycore init
+   - .memorycore directory structure
+   - SQLite migration
+   - graph_nodes / graph_edges schema
+   - event_log schema
+   - file/folder scanner
+   - daemon start/status/stop/logs
+   - graph file/folder command
+   - Mermaid export
+6. Sau MVP, thêm MCP tools:
+   - memorycore_search
+   - memorycore_snapshot
+   - memorycore_graph_query
+   - memorycore_graph_render
+   - memorycore_find_impact
+7. Sau MCP, thêm plugin host và skill registry.
+8. Sau đó mới làm dashboard interactive graph.
+
+Yêu cầu kỹ thuật:
+- Dùng Rust cho core/daemon/CLI.
+- Dùng SQLite với WAL mode.
+- Dùng clap cho CLI.
+- Dùng serde/serde_json cho metadata.
+- Dùng tree-sitter cho symbol graph khi đến phase parser.
+- Giữ code nhỏ, rõ, testable.
+- Không build quá nhiều thứ cùng lúc nếu MVP chưa chạy.
+- Mỗi phase phải có verification command rõ ràng.
+- Không làm cloud/server sync trước khi local MVP ổn.
+
+Acceptance criteria cho MVP:
+- `memorycore init` tạo được `.memorycore/`.
+- SQLite database có schema cơ bản.
+- `memorycore daemon start` chạy được local daemon.
+- `memorycore daemon status` trả trạng thái.
+- `memorycore graph file <path>` tạo graph cho file.
+- `memorycore graph folder <path>` tạo graph cho folder.
+- `memorycore graph export --format mermaid` xuất Mermaid diagram.
+- Có test hoặc command verification cho từng phần.

@@ -1,0 +1,28 @@
+[package]
+name = "memorycore-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "memorycore"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+memorycore-core = { path = "../memorycore-core" }
+memorycore-daemon = { path = "../memorycore-daemon" }
+memorycore-graph = { path = "../memorycore-graph" }
+memorycore-embeddings = { path = "../memorycore-embeddings" }
+memorycore-plugin-host = { path = "../memorycore-plugin-host" }
+memorycore-api = { path = "../memorycore-api" }
+memorycore-adapters = { path = "../memorycore-adapters" }
+rusqlite.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
+tempfile.workspace = true

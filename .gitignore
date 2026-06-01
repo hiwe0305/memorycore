@@ -1,0 +1,5 @@
+/target/
+/.memorycore/
+**/*.db
+**/*.db-shm
+**/*.db-wal
