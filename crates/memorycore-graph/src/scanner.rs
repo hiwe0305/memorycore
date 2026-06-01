@@ -1,4 +1,6 @@
 use crate::model::{GraphEdge, GraphNode};
+use crate::parser::js::{extract_js_imports, parse_js_symbols};
+use crate::parser::ts::{extract_ts_imports, parse_ts_symbols};
 use crate::parser::{
     extract_rust_call_sites, extract_rust_imports, extract_rust_module_decls, parse_rust_symbols,
 };
@@ -29,9 +31,51 @@ pub fn scan_file(conn: &Connection, project_root: &Path, path: &Path) -> Result<
     let file_node = file_node(project_root, path)?;
     let mut rust_imports = Vec::new();
     let mut rust_symbols = Vec::new();
-    if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+    let lang = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_string();
+    let is_rust = lang == "rs";
+    let is_js = matches!(lang.as_str(), "js" | "jsx");
+    let is_ts = matches!(lang.as_str(), "ts" | "tsx");
+    if is_rust {
         rust_imports = extract_rust_imports(project_root, path)?;
         rust_symbols = parse_rust_symbols(project_root, path)?;
+    } else if is_js {
+        rust_imports = extract_js_imports(project_root, path)?
+            .into_iter()
+            .map(|i| crate::parser::ParsedImport {
+                node: i.node,
+                import_edge: i.import_edge,
+                import_path: i.import_path,
+            })
+            .collect();
+        rust_symbols = parse_js_symbols(project_root, path)?
+            .into_iter()
+            .map(|s| crate::parser::ParsedSymbol {
+                node: s.node,
+                defines_edge: s.defines_edge,
+                extra_edges: s.extra_edges,
+            })
+            .collect();
+    } else if is_ts {
+        rust_imports = extract_ts_imports(project_root, path)?
+            .into_iter()
+            .map(|i| crate::parser::ParsedImport {
+                node: i.node,
+                import_edge: i.import_edge,
+                import_path: i.import_path,
+            })
+            .collect();
+        rust_symbols = parse_ts_symbols(project_root, path)?
+            .into_iter()
+            .map(|s| crate::parser::ParsedSymbol {
+                node: s.node,
+                defines_edge: s.defines_edge,
+                extra_edges: s.extra_edges,
+            })
+            .collect();
     }
 
     prune_file_graph_for_scan(conn, &file_node, &rust_imports, &rust_symbols)?;
@@ -43,9 +87,16 @@ pub fn scan_file(conn: &Connection, project_root: &Path, path: &Path) -> Result<
     index_file_content(conn, path, file_node.hash.as_deref())?;
     summary.files = 1;
     summary.edges = 1;
-    if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-        for symbol in rust_symbols {
+    if is_rust || is_js || is_ts {
+        // Phase 1: upsert all nodes first so FK targets exist.
+        for symbol in &rust_symbols {
             upsert_node(conn, &symbol.node)?;
+        }
+        for import in &rust_imports {
+            upsert_node(conn, &import.node)?;
+        }
+        // Phase 2: upsert edges (all referenced nodes now exist).
+        for symbol in rust_symbols {
             upsert_edge(conn, &symbol.defines_edge)?;
             for edge in symbol.extra_edges {
                 upsert_edge(conn, &edge)?;
@@ -54,7 +105,6 @@ pub fn scan_file(conn: &Connection, project_root: &Path, path: &Path) -> Result<
             summary.edges += 1;
         }
         for import in &rust_imports {
-            upsert_node(conn, &import.node)?;
             upsert_edge(conn, &import.import_edge)?;
             summary.edges += 1;
         }
@@ -207,9 +257,52 @@ pub fn scan_folder(conn: &Connection, project_root: &Path, folder: &Path) -> Res
             let node = file_node(project_root, path)?;
             let mut imports = Vec::new();
             let mut symbols = Vec::new();
-            if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            let lang = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_string();
+            if lang == "rs" {
                 imports = extract_rust_imports(project_root, path)?;
                 symbols = parse_rust_symbols(project_root, path)?;
+            } else if lang == "js" || lang == "jsx" {
+                let js_imports = extract_js_imports(project_root, path)?;
+                let js_symbols = parse_js_symbols(project_root, path)?;
+                imports = js_imports
+                    .into_iter()
+                    .map(|i| crate::parser::ParsedImport {
+                        node: i.node,
+                        import_edge: i.import_edge,
+                        import_path: i.import_path,
+                    })
+                    .collect();
+                symbols = js_symbols
+                    .into_iter()
+                    .map(|s| crate::parser::ParsedSymbol {
+                        node: s.node,
+                        defines_edge: s.defines_edge,
+                        extra_edges: s.extra_edges,
+                    })
+                    .collect();
+            } else if lang == "ts" || lang == "tsx" {
+                let ts_imports = extract_ts_imports(project_root, path)?;
+                let ts_symbols = parse_ts_symbols(project_root, path)?;
+                imports = ts_imports
+                    .into_iter()
+                    .map(|i| crate::parser::ParsedImport {
+                        node: i.node,
+                        import_edge: i.import_edge,
+                        import_path: i.import_path,
+                    })
+                    .collect();
+                symbols = ts_symbols
+                    .into_iter()
+                    .map(|s| crate::parser::ParsedSymbol {
+                        node: s.node,
+                        defines_edge: s.defines_edge,
+                        extra_edges: s.extra_edges,
+                    })
+                    .collect();
             }
             prune_file_graph_for_scan(conn, &node, &imports, &symbols)?;
             upsert_node(conn, &node)?;
@@ -217,10 +310,17 @@ pub fn scan_folder(conn: &Connection, project_root: &Path, folder: &Path) -> Res
             index_file_content(conn, path, node.hash.as_deref())?;
             summary.files += 1;
             summary.edges += 1;
-            if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            if lang == "rs" || lang == "js" || lang == "jsx" || lang == "ts" || lang == "tsx" {
                 rust_files.push(path.to_path_buf());
-                for symbol in symbols {
+                // Phase 1: upsert all nodes first so FK targets exist.
+                for symbol in &symbols {
                     upsert_node(conn, &symbol.node)?;
+                }
+                for import in &imports {
+                    upsert_node(conn, &import.node)?;
+                }
+                // Phase 2: upsert edges (all referenced nodes now exist).
+                for symbol in symbols {
                     upsert_edge(conn, &symbol.defines_edge)?;
                     for edge in symbol.extra_edges {
                         upsert_edge(conn, &edge)?;
@@ -229,7 +329,6 @@ pub fn scan_folder(conn: &Connection, project_root: &Path, folder: &Path) -> Res
                     summary.edges += 1;
                 }
                 for import in &imports {
-                    upsert_node(conn, &import.node)?;
                     upsert_edge(conn, &import.import_edge)?;
                     summary.edges += 1;
                 }
@@ -840,14 +939,14 @@ fn is_ignored(entry: &DirEntry) -> bool {
     let name = entry.file_name().to_string_lossy();
     matches!(
         name.as_ref(),
-        ".git" | ".memorycore" | "target" | "node_modules" | ".codegraph" | ".codex" | ".agents"
+        ".git" | ".memorycore" | "target" | "node_modules" | "dist" | "build" | ".next" | ".venv" | "__pycache__" | ".pytest_cache" | ".yarn" | ".codegraph" | ".codex" | ".agents"
     )
 }
 
 fn is_probably_binary(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "pdf" | "zip" | "gz" | "zst" | "db"
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "pdf" | "zip" | "gz" | "zst" | "db" | "svg" | "woff" | "woff2" | "eot" | "ttf" | "mp4" | "mp3" | "ogg" | "wasm"
     )
 }
 

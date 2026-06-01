@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod color;
 pub mod search;
 pub mod snapshot;
 pub mod storage;

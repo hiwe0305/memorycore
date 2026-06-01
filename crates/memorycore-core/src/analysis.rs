@@ -95,7 +95,11 @@ pub fn format_analysis_report(report: &AnalysisReport) -> String {
             node.path.as_deref().unwrap_or("")
         ));
     } else {
-        output.push_str("Resolved node: none\n\n");
+        output.push_str(&format!(
+            "⚠ Target '{}' not found in the graph.\n  File may not exist, not indexed, or use an unsupported language.\n  Run `memorycore search \"{}\" --kind File` to find existing files.\n\n",
+            report.target,
+            report.target.rsplit(|c: char| c == '/' || c == '\\' || c == '.').last().unwrap_or(&report.target)
+        ));
     }
 
     output.push_str(&format!(

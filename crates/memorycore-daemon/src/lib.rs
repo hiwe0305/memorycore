@@ -112,6 +112,14 @@ pub fn run(project_root: &Path) -> Result<()> {
     if let Err(error) = full_rescan(project_root, &conn) {
         append_log(&layout, &format!("initial rescan failed: {error}"))?;
     }
+    // Fire onDaemonStart hook for all registered plugins
+    if let Err(error) = memorycore_plugin_host::execute_hook(
+        project_root,
+        "onDaemonStart",
+        serde_json::json!({"started_at": now_unix()})
+    ) {
+        append_log(&layout, &format!("plugin onDaemonStart hook failed: {error}"))?;
+    }
     let mut next_background_poll = Instant::now();
     loop {
         let now = Instant::now();
@@ -205,6 +213,11 @@ pub fn run(project_root: &Path) -> Result<()> {
                 append_log(&layout, &format!("snapshot failed: {error}"))?;
             } else {
                 touch_status(&layout, &status)?;
+                let _ = memorycore_plugin_host::execute_hook(
+                    project_root,
+                    "onSnapshotCreated",
+                    serde_json::json!({"snapshot_needed": true})
+                );
             }
         }
     }
@@ -373,8 +386,24 @@ fn process_file_event(
     event: FileChangeEvent,
 ) -> Result<bool> {
     match event {
-        FileChangeEvent::Deleted(path) => delete_path(project_root, conn, cache, &path),
-        FileChangeEvent::Changed(path) => scan_changed_path(project_root, conn, cache, &path),
+        FileChangeEvent::Deleted(path) => {
+            let result = delete_path(project_root, conn, cache, &path);
+            let _ = memorycore_plugin_host::execute_hook(
+                project_root,
+                "onFileDeleted",
+                serde_json::json!({"path": path.to_string_lossy().to_string()})
+            );
+            result
+        }
+        FileChangeEvent::Changed(path) => {
+            let result = scan_changed_path(project_root, conn, cache, &path);
+            let _ = memorycore_plugin_host::execute_hook(
+                project_root,
+                "onFileChanged",
+                serde_json::json!({"path": path.to_string_lossy().to_string()})
+            );
+            result
+        }
         FileChangeEvent::Renamed { from, to } => {
             let mut changed = delete_path(project_root, conn, cache, &from)?;
             changed |= scan_changed_path(project_root, conn, cache, &to)?;

@@ -196,6 +196,100 @@ fn tools_list_result() -> Value {
                     },
                     "required": ["target"]
                 }
+            },
+            {
+                "name": "memorycore_plugins",
+                "description": "List installed plugins with their status.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                    }
+                }
+            },
+            {
+                "name": "memorycore_skills",
+                "description": "List registered skills with their descriptions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                    }
+                }
+            },
+            {
+                "name": "memorycore_skill_context",
+                "description": "Get full SKILL.md content for a registered skill.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "Skill name to fetch context for." }
+                    },
+                    "required": ["name"]
+                }
+            },
+            {
+                "name": "memorycore_plugin_exec",
+                "description": "Execute a plugin hook manually (for testing).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "hook": { "type": "string", "description": "Hook name to trigger (e.g. onDaemonStart)." },
+                        "data": { "type": "object", "description": "Optional JSON context data." }
+                    },
+                    "required": ["hook"]
+                }
+            },
+            {
+                "name": "memorycore_harness_agents",
+                "description": "List agents tracked by the harness with their status.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            },
+            {
+                "name": "memorycore_harness_activity",
+                "description": "List recent agent activity from the harness.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "agent": { "type": "string", "description": "Optional agent name filter." },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                    }
+                }
+            },
+            {
+                "name": "memorycore_skill_execute",
+                "description": "Execute a registered skill by id.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "skill_id": { "type": "string" },
+                        "agent": { "type": "string", "description": "Optional agent name." },
+                        "inputs": { "type": "object", "description": "JSON inputs for the skill." }
+                    },
+                    "required": ["skill_id"]
+                }
+            },
+            {
+                "name": "memorycore_skill_runs",
+                "description": "List recent skill execution runs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "skill": { "type": "string", "description": "Optional skill id filter." },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                    }
+                }
+            },
+            {
+                "name": "memorycore_harness_connect",
+                "description": "Auto-discover coding agents on this machine and register them as adapters.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
             }
         ]
     })
@@ -235,6 +329,15 @@ fn handle_tool_call(project_root: &Path, params: Option<&Value>) -> Result<Value
         "memorycore_embeddings" => embeddings(project_root, &arguments)?,
         "memorycore_embedding_search" => embedding_search(project_root, &arguments)?,
         "memorycore_analyze" => analyze(&conn, &arguments)?,
+        "memorycore_plugins" => plugins_list(project_root, &arguments)?,
+        "memorycore_skills" => skills_list(project_root, &arguments)?,
+        "memorycore_skill_context" => skill_context(project_root, &arguments)?,
+        "memorycore_plugin_exec" => plugin_exec(project_root, &arguments)?,
+        "memorycore_harness_agents" => harness_agents(project_root, &arguments)?,
+        "memorycore_harness_activity" => harness_activity(project_root, &arguments)?,
+        "memorycore_skill_execute" => skill_execute(project_root, &arguments)?,
+        "memorycore_skill_runs" => skill_runs(project_root, &arguments)?,
+        "memorycore_harness_connect" => harness_connect(project_root, &arguments)?,
         _ => bail!("unknown MemoryCore tool {name}"),
     };
 
@@ -699,6 +802,143 @@ fn write_message(writer: &mut impl Write, value: &Value) -> Result<()> {
     writer.flush()?;
     Ok(())
 }
+
+fn plugin_exec(project_root: &Path, arguments: &Value) -> Result<String> {
+    let hook = required_string(arguments, "hook")?;
+    let data = arguments.get("data").cloned().unwrap_or(serde_json::json!({}));
+    let results = memorycore_plugin_host::execute_hook(project_root, hook, data)?;
+    let mut output = String::new();
+    for result in &results {
+        let status = if result.success { "OK" } else { "FAIL" };
+        output.push_str(&format!(
+            "- plugin:{} hook:{} [{}] exit_code={:?}\n",
+            result.plugin_id, result.hook, status, result.exit_code
+        ));
+        if !result.stdout.is_empty() {
+            for line in result.stdout.lines().take(5) {
+                output.push_str(&format!("  stdout> {}\n", line));
+            }
+        }
+        if !result.stderr.is_empty() {
+            for line in result.stderr.lines().take(5) {
+                output.push_str(&format!("  stderr> {}\n", line));
+            }
+        }
+    }
+    if output.is_empty() { output.push_str("No plugins executed.\n"); }
+    Ok(output)
+}
+
+fn plugins_list(project_root: &Path, arguments: &Value) -> Result<String> {
+    let limit = limit(arguments, 25) as usize;
+    let plugins = memorycore_plugin_host::list_plugins(project_root)?;
+    let mut output = String::new();
+    for (i, plugin) in plugins.iter().enumerate() {
+        if i >= limit { break; }
+        let state = if plugin.enabled { "enabled" } else { "disabled" };
+        output.push_str(&format!(
+            "- plugin:{} [{}] name={} version={}\n",
+            plugin.id, state, plugin.name, plugin.version
+        ));
+    }
+    if output.is_empty() { output.push_str("No plugins installed.\n"); }
+    Ok(output)
+}
+
+fn skills_list(project_root: &Path, arguments: &Value) -> Result<String> {
+    let limit = limit(arguments, 25) as usize;
+    let skills = memorycore_plugin_host::list_skills(project_root)?;
+    let mut output = String::new();
+    for (i, skill) in skills.iter().enumerate() {
+        if i >= limit { break; }
+        let state = if skill.enabled { "enabled" } else { "disabled" };
+        let desc = skill.description.as_deref().unwrap_or("");
+        output.push_str(&format!(
+            "- skill:{} [{}] name={} description={}\n",
+            skill.id, state, skill.name, desc
+        ));
+    }
+    if output.is_empty() { output.push_str("No skills registered.\n"); }
+    Ok(output)
+}
+
+fn skill_context(project_root: &Path, arguments: &Value) -> Result<String> {
+    let name = required_string(arguments, "name")?;
+    let skills = memorycore_plugin_host::list_skills(project_root)?;
+    let skill = skills.iter().find(|s| s.name == name || s.id == name)
+        .context("skill not found")?;
+    let path = std::path::Path::new(&skill.skill_path);
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("read {}", path.display()))?;
+    Ok(format!("# Skill: {} ({})\n\n{}", skill.name, skill.id, content))
+}
+
+
+fn harness_agents(project_root: &Path, _arguments: &Value) -> Result<String> {
+    let agents = memorycore_harness::list_agents(project_root)?;
+    let mut output = String::new();
+    for a in &agents {
+        output.push_str(&format!("- {} status={} last_seen={}\n", a.agent_name, a.status, a.last_seen));
+    }
+    if output.is_empty() { output.push_str("No agents recorded.\n"); }
+    Ok(output)
+}
+
+fn harness_activity(project_root: &Path, arguments: &Value) -> Result<String> {
+    let agent = arguments.get("agent").and_then(Value::as_str);
+    let limit = limit(arguments, 25) as usize;
+    let activities = memorycore_harness::list_activity(project_root, agent, limit)?;
+    let mut output = String::new();
+    for a in &activities {
+        let summary = a.summary.as_deref().unwrap_or("");
+        output.push_str(&format!("- {} {} {} {}\n", a.created_at, a.agent_name, a.activity_type, summary));
+    }
+    if output.is_empty() { output.push_str("No activity found.\n"); }
+    Ok(output)
+}
+
+fn skill_execute(project_root: &Path, arguments: &Value) -> Result<String> {
+    let skill_id = required_string(arguments, "skill_id")?;
+    let agent = arguments.get("agent").and_then(Value::as_str);
+    let inputs = arguments.get("inputs").cloned().unwrap_or(serde_json::json!({}));
+    let result = memorycore_harness::execute_skill(project_root, skill_id, agent, inputs)?;
+    let status = if result.success { "OK" } else { "FAIL" };
+    Ok(format!(
+        "Skill run: id={} skill={} [{}] duration={:?}ms\n\n{}",
+        result.id, result.skill_id, status, result.duration_ms,
+        result.output_summary.as_deref().unwrap_or("")
+    ))
+}
+
+fn skill_runs(project_root: &Path, arguments: &Value) -> Result<String> {
+    let skill = arguments.get("skill").and_then(Value::as_str);
+    let limit = limit(arguments, 25) as usize;
+    let runs = memorycore_harness::list_skill_runs(project_root, skill, limit)?;
+    let mut output = String::new();
+    for r in &runs {
+        let agent = r.agent_name.as_deref().unwrap_or("-");
+        let status = if r.success { "OK" } else { "FAIL" };
+        output.push_str(&format!("- id={} skill={} agent={} [{}] {}ms\n",
+            r.id, r.skill_id, agent, status, r.duration_ms.unwrap_or(0)));
+    }
+    if output.is_empty() { output.push_str("No skill runs found.\n"); }
+    Ok(output)
+}
+
+
+fn harness_connect(project_root: &Path, _arguments: &Value) -> Result<String> {
+    let discovered = memorycore_harness::auto_connect(project_root)?;
+    if discovered.is_empty() {
+        return Ok("No agents discovered.".to_string());
+    }
+    let mut output = String::new();
+    for agent in &discovered {
+        output.push_str(&format!("- {} type={}\n", agent.name, agent.agent_type));
+    }
+    output.push_str(&format!("\nMCP configs written to .memorycore/mcp/"));
+    Ok(output)
+}
+
 
 #[cfg(test)]
 mod tests {

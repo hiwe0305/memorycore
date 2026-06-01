@@ -110,6 +110,14 @@ enum Command {
         #[command(subcommand)]
         command: ApiCommand,
     },
+    Harness {
+        #[command(subcommand)]
+        command: HarnessCommand,
+    },
+    Skill {
+        #[command(subcommand)]
+        command: SkillCliCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -242,6 +250,48 @@ enum ApiCommand {
     Serve,
 }
 
+#[derive(Debug, Subcommand)]
+enum HarnessCommand {
+    Status,
+    Activity {
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
+    Agents,
+    Connect,
+    Record {
+        #[arg(long)]
+        agent: String,
+        #[arg(long)]
+        activity: String,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        data: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillCliCommand {
+    Execute {
+        skill_id: String,
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long)]
+        inputs: Option<String>,
+    },
+    Runs {
+        #[arg(long)]
+        skill: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
+}
+
 #[derive(Debug, Clone, ValueEnum)]
 enum ExportFormat {
     Mermaid,
@@ -274,6 +324,7 @@ fn main() -> Result<()> {
             println!("Initialized MemoryCore at {}", layout.memorycore.display());
         }
         Command::Status => {
+            use memorycore_core::color;
             let conn = connect_project_db(&project_root)?;
             let node_count: i64 =
                 conn.query_row("SELECT COUNT(*) FROM graph_nodes", [], |row| row.get(0))?;
@@ -291,21 +342,26 @@ fn main() -> Result<()> {
                 conn.query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get(0))?;
             let snapshot_total = snapshot_count(&conn)?;
             let daemon_status = memorycore_daemon::status(project_root.as_path());
-            println!("MemoryCore project: {}", project_root.display());
-            println!("Graph nodes: {node_count}");
-            println!("Graph edges: {edge_count}");
-            println!("Plugins: {plugin_count}");
-            println!("Skills: {skill_count}");
-            println!("Adapters: {adapter_count}");
-            println!("Memory cases: {memory_case_count}");
-            println!("Embeddings: {embedding_count}");
-            println!("Snapshots: {snapshot_total}");
+            println!("{}", color::header("MEMORYCORE STATUS"));
+            println!("  {}  Project:  {}", color::cyan("ℹ"), project_root.display());
+            println!("  {}  Nodes:    {}  Edges:    {}", color::green("◉"), node_count, edge_count);
+            println!("  {}  Plugins:  {}  Skills:   {}", color::blue("◆"), plugin_count, skill_count);
+            println!("  {}  Adapters: {}  Memory:   {}", color::magenta("◆"), adapter_count, memory_case_count);
+            println!("  {}  Embeddings: {}  Snapshots: {}", color::cyan("◆"), embedding_count, snapshot_total);
             match daemon_status {
                 Ok(status) => println!(
-                    "Daemon: running pid={} started_at={} last_activity_at={}",
-                    status.pid, status.started_at, status.last_activity_at
+                    "  {}  Daemon:  {}  pid={}  started={}",
+                    color::green("●"),
+                    color::green("running"),
+                    status.pid,
+                    status.started_at,
                 ),
-                Err(error) => println!("Daemon: not running ({error})"),
+                Err(error) => println!(
+                    "  {}  Daemon: {}  ({})",
+                    color::red("○"),
+                    color::red("stopped"),
+                    error
+                ),
             }
         }
         Command::Daemon { command } => handle_daemon(command, &project_root)?,
@@ -346,6 +402,8 @@ fn main() -> Result<()> {
         Command::Api { command } => match command {
             ApiCommand::Serve => memorycore_api::serve(&project_root, "127.0.0.1:7330")?,
         },
+        Command::Harness { command } => handle_harness(command, &project_root)?,
+        Command::Skill { command } => handle_skill(command, &project_root)?,
     }
     Ok(())
 }
@@ -699,6 +757,110 @@ fn collect_events(
     }
     Ok(events)
 }
+
+fn handle_harness(command: HarnessCommand, project_root: &PathBuf) -> Result<()> {
+    match command {
+        HarnessCommand::Status => {
+            let s = memorycore_harness::status(project_root)?;
+            use memorycore_core::color;
+            println!("{}", color::header("HARNESS STATUS"));
+            println!("  {}  {}", if s.running { color::green("●") } else { color::red("○") }, "Running");
+            println!("  {}  Agents seen: {}", color::cyan("►"), s.agent_count);
+            println!("  {}  Activities: {}", color::cyan("►"), s.activity_count);
+            println!("  {}  Skill runs: {}", color::cyan("►"), s.skill_run_count);
+        }
+        HarnessCommand::Activity { agent, limit } => {
+            use memorycore_core::color;
+            let activities = memorycore_harness::list_activity(project_root, agent.as_deref(), limit)?;
+            if activities.is_empty() {
+                println!("{}", color::dim("No agent activity found."));
+            } else {
+                println!("{}", color::header("AGENT ACTIVITY"));
+                for a in &activities {
+                    let summary = a.summary.as_deref().unwrap_or("");
+                    let atype = color::label(&a.activity_type);
+                    let aname = color::cyan(&a.agent_name);
+                    println!("  {}  {}  {}", aname, atype, color::dim(&summary));
+                }
+            }
+        }
+        HarnessCommand::Agents => {
+            use memorycore_core::color;
+            let agents = memorycore_harness::list_agents(project_root)?;
+            if agents.is_empty() {
+                println!("{}", color::dim("No agents recorded."));
+            } else {
+                println!("{}", color::header("AGENTS"));
+                for a in &agents {
+                    let session = a.session_dir.as_deref().unwrap_or("-");
+                    let status_colored = color::label(&a.status);
+                    let name_colored = color::cyan(&a.agent_name);
+                    println!("  {}  {}  status={}", color::green("●"), name_colored, status_colored);
+                    println!("       {} last_seen={}", color::dim("session:"), session);
+                }
+            }
+        }
+        HarnessCommand::Connect => {
+            let discovered = memorycore_harness::auto_connect(project_root)?;
+            if discovered.is_empty() {
+                println!("{} No agents discovered.", memorycore_core::color::fail(""));
+            } else {
+                for agent in &discovered {
+                    let name = memorycore_core::color::cyan(&agent.name);
+                    let atype = memorycore_core::color::dim(&agent.agent_type);
+                    println!("{} {} type={}", memorycore_core::color::ok(""), name, atype);
+                }
+                println!();
+                println!("{} MCP configs written to .memorycore/mcp/", memorycore_core::color::dim("  i"));
+                println!("  Add these to your agent's MCP configuration to connect back.");
+            }
+        }
+        HarnessCommand::Record { agent, activity, target, summary, data } => {
+            let metadata = data
+                .as_deref()
+                .map(|d| serde_json::from_str::<serde_json::Value>(d).unwrap_or_else(|_| serde_json::json!({"raw": d})))
+                .unwrap_or_else(|| serde_json::json!({}));
+            let id = memorycore_harness::record_activity(
+                project_root, &agent, &activity, target.as_deref(), summary.as_deref(), metadata
+            )?;
+            println!("Recorded activity id={}", id);
+        }
+    }
+    Ok(())
+}
+
+fn handle_skill(command: SkillCliCommand, project_root: &PathBuf) -> Result<()> {
+    match command {
+        SkillCliCommand::Execute { skill_id, agent, inputs } => {
+            let inputs_json = inputs
+                .as_deref()
+                .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap_or_else(|_| serde_json::json!({"raw": s})))
+                .unwrap_or_else(|| serde_json::json!({}));
+            let result = memorycore_harness::execute_skill(project_root, &skill_id, agent.as_deref(), inputs_json)?;
+            println!("Skill run: id={} skill={} success={} duration={:?}ms",
+                result.id, result.skill_id, result.success, result.duration_ms);
+            if let Some(output) = &result.output_summary {
+                println!("--- output ---");
+                println!("{}", output);
+            }
+        }
+        SkillCliCommand::Runs { skill, limit } => {
+            let runs = memorycore_harness::list_skill_runs(project_root, skill.as_deref(), limit)?;
+            if runs.is_empty() {
+                println!("No skill runs found.");
+            } else {
+                for r in &runs {
+                    let agent = r.agent_name.as_deref().unwrap_or("-");
+                    let status = if r.success { "OK" } else { "FAIL" };
+                    println!("id={} skill={} agent={} [{}] {}ms",
+                        r.id, r.skill_id, agent, status, r.duration_ms.unwrap_or(0));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {

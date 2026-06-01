@@ -491,6 +491,7 @@ dependencies = [
  "memorycore-daemon",
  "memorycore-embeddings",
  "memorycore-graph",
+ "memorycore-harness",
  "memorycore-plugin-host",
  "rusqlite",
  "serde_json",
@@ -556,8 +557,27 @@ dependencies = [
  "sha2",
  "tempfile",
  "tree-sitter",
+ "tree-sitter-javascript",
  "tree-sitter-rust",
+ "tree-sitter-typescript",
  "walkdir",
+]
+
+[[package]]
+name = "memorycore-harness"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "memorycore-adapters",
+ "memorycore-core",
+ "memorycore-embeddings",
+ "memorycore-graph",
+ "memorycore-plugin-host",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]
@@ -841,10 +861,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "tree-sitter-rust"
+name = "tree-sitter-javascript"
 version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0832309b0b2b6d33760ce5c0e818cb47e1d72b468516bfe4134408926fa7594"
+checksum = "d015c02ea98b62c806f7329ff71c383286dfc3a7a7da0cc484f6e42922f73c2c"
+dependencies = [
+ "cc",
+ "tree-sitter",
+]
+
+[[package]]
+name = "tree-sitter-rust"
+version = "0.20.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "797842733e252dc11ae5d403a18060bf337b822fc2ae5ddfaa6ff4d9cc20bda6"
+dependencies = [
+ "cc",
+ "tree-sitter",
+]
+
+[[package]]
+name = "tree-sitter-typescript"
+version = "0.20.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8bc1d2c24276a48ef097a71b56888ac9db63717e8f8d0b324668a27fd619670"
 dependencies = [
  "cc",
  "tree-sitter",

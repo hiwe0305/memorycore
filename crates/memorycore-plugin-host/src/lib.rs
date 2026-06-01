@@ -460,3 +460,166 @@ fn first_description_line(text: &str) -> Option<String> {
 pub fn plugin_manifest_path(plugin_dir: &Path) -> PathBuf {
     plugin_dir.join("plugin.json")
 }
+
+
+// ---------------------------------------------------------------------------
+// Plugin Runtime — execute plugin entry points as shell commands
+// ---------------------------------------------------------------------------
+
+use std::process::{Command, Stdio};
+
+/// Result of executing a plugin hook
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PluginExecResult {
+    pub plugin_id: String,
+    pub plugin_name: String,
+    pub hook: String,
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+}
+
+/// Context passed to a plugin hook execution
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PluginContext {
+    pub hook: String,
+    pub project_root: String,
+    pub data: serde_json::Value,
+}
+
+/// Execute all plugins registered for a given hook.
+/// Returns results for each plugin that had the hook registered.
+pub fn execute_hook(
+    project_root: &Path,
+    hook: &str,
+    data: serde_json::Value,
+) -> Result<Vec<PluginExecResult>> {
+    let conn = connect_project_db(project_root)?;
+    let plugins = list_plugins(project_root)?;
+    let mut results = Vec::new();
+
+    for plugin in &plugins {
+        if !plugin.enabled {
+            continue;
+        }
+        if !plugin_has_hook(&conn, &plugin.id, hook)? {
+            continue;
+        }
+        let result = execute_plugin_entry(project_root, plugin, hook, &data)?;
+        results.push(result);
+    }
+
+    Ok(results)
+}
+
+/// Execute a single plugin's entry point with the given hook context.
+fn execute_plugin_entry(
+    project_root: &Path,
+    plugin: &RegisteredPlugin,
+    hook: &str,
+    data: &serde_json::Value,
+) -> Result<PluginExecResult> {
+    let context = PluginContext {
+        hook: hook.to_string(),
+        project_root: project_root.to_string_lossy().to_string(),
+        data: data.clone(),
+    };
+    let context_json = serde_json::to_string(&context)?;
+
+    let entry_path = Path::new(&plugin.entry);
+    let entry = if entry_path.is_absolute() {
+        entry_path.to_path_buf()
+    } else {
+        project_root.join(&plugin.entry)
+    };
+
+    // Check if the entry exists and is executable
+    if !entry.is_file() {
+        return Ok(PluginExecResult {
+            plugin_id: plugin.id.clone(),
+            plugin_name: plugin.name.clone(),
+            hook: hook.to_string(),
+            success: false,
+            stdout: String::new(),
+            stderr: format!("entry not found: {}", entry.display()),
+            exit_code: None,
+        });
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::metadata(&entry)?;
+        if meta.permissions().mode() & 0o111 == 0 {
+            return Ok(PluginExecResult {
+                plugin_id: plugin.id.clone(),
+                plugin_name: plugin.name.clone(),
+                hook: hook.to_string(),
+                success: false,
+                stdout: String::new(),
+                stderr: format!("entry not executable: {}", entry.display()),
+                exit_code: None,
+            });
+        }
+    }
+
+    let output = Command::new(&entry)
+        .arg("--hook")
+        .arg(hook)
+        .arg("--context")
+        .arg(&context_json)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .with_context(|| format!("execute plugin {}", entry.display()))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    // Log execution event
+    if let Ok(conn) = connect_project_db(project_root) {
+        let _ = memorycore_core::append_event(
+            &conn,
+            "memorycore-plugin-host",
+            if output.status.success() { "plugin_hook_completed" } else { "plugin_hook_failed" },
+            &serde_json::json!({
+                "plugin_id": plugin.id,
+                "plugin_name": plugin.name,
+                "hook": hook,
+                "stdout_preview": stdout.chars().take(200).collect::<String>(),
+                "stderr_preview": stderr.chars().take(200).collect::<String>(),
+            }),
+        );
+    }
+
+    Ok(PluginExecResult {
+        plugin_id: plugin.id.clone(),
+        plugin_name: plugin.name.clone(),
+        hook: hook.to_string(),
+        success: output.status.success(),
+        stdout,
+        stderr,
+        exit_code: output.status.code(),
+    })
+}
+
+fn plugin_has_hook(conn: &Connection, plugin_id: &str, hook: &str) -> Result<bool> {
+    let hooks_json: Option<String> = conn
+        .query_row(
+            "SELECT hooks FROM plugins WHERE id = ?1 LIMIT 1",
+            [plugin_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+    match hooks_json {
+        Some(json_str) => {
+            let hooks: Vec<String> = serde_json::from_str(&json_str)
+                .unwrap_or_default();
+            Ok(hooks.iter().any(|h| h == hook))
+        }
+        None => Ok(false),
+    }
+}

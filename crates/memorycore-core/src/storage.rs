@@ -271,6 +271,33 @@ fn migrate(conn: &Connection) -> Result<()> {
             updated_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS agent_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_name TEXT NOT NULL,
+            activity_type TEXT NOT NULL,
+            target TEXT,
+            summary TEXT,
+            metadata TEXT DEFAULT '{}',
+            created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_activity_agent
+            ON agent_activity(agent_name, created_at);
+
+        CREATE TABLE IF NOT EXISTS skill_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            skill_id TEXT NOT NULL,
+            agent_name TEXT,
+            inputs TEXT DEFAULT '{}',
+            output_summary TEXT,
+            success INTEGER NOT NULL DEFAULT 1,
+            duration_ms INTEGER,
+            created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_skill_runs_skill
+            ON skill_runs(skill_id, created_at);
+
         CREATE INDEX IF NOT EXISTS idx_embeddings_type ON embeddings(chunk_type);
         CREATE INDEX IF NOT EXISTS idx_graph_nodes_kind ON graph_nodes(kind);
         CREATE INDEX IF NOT EXISTS idx_graph_nodes_path ON graph_nodes(path);
